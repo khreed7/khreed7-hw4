@@ -3,8 +3,10 @@ import sqlite3
 import os
 import csv
 import traceback
+import json
 
 app = Flask(__name__)
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True  # Enable pretty printing of JSON
 
 # Allowed measures
 ALLOWED_MEASURES = {
@@ -63,15 +65,8 @@ def init_db():
             )
         ''')
         
-        # Print current working directory and list files for debugging
-        print(f"Current working directory: {os.getcwd()}")
-        print(f"Files in directory: {os.listdir('.')}")
-        print(f"Files in csv_data: {os.listdir('csv_data')}")
-        
         # Load data from CSV files
         csv_dir = os.path.join(os.path.dirname(__file__), '..', 'csv_data')
-        print(f"CSV directory path: {csv_dir}")
-        print(f"Files in CSV directory: {os.listdir(csv_dir)}")
         
         with open(os.path.join(csv_dir, 'county_health_rankings.csv'), 'r') as f:
             reader = csv.reader(f)
@@ -90,7 +85,6 @@ def init_db():
             )
         
         db.commit()
-        print("Database initialized successfully")
         return db
         
     except Exception as e:
@@ -156,14 +150,18 @@ def county_data():
         query = '''
         SELECT DISTINCT chr.* 
         FROM county_health_rankings chr
+        JOIN zip_county zc ON chr.County = TRIM(REPLACE(zc.county, ' County', '')) || ' County'
+            AND chr.State = zc.county_state
         WHERE chr.Measure_name = ?
+            AND zc.zip = ?
+        ORDER BY chr.Year_span DESC
         LIMIT ?
         '''
-        rows = db.execute(query, (measure_name, limit)).fetchall()
+        rows = db.execute(query, (measure_name, zip_code, limit)).fetchall()
 
         # If no data is found
         if not rows:
-            return jsonify({'error': f'No data found for measure {measure_name}'}), 404
+            return jsonify({'error': f'No data found for ZIP {zip_code} and measure {measure_name}'}), 404
 
         # Convert results into a list of dictionaries
         column_names = [
@@ -177,7 +175,12 @@ def county_data():
         for row in rows:
             results.append(dict(zip(column_names, row)))
 
-        return jsonify(results)
+        # Return formatted JSON response
+        return app.response_class(
+            response=json.dumps(results, indent=2),
+            status=200,
+            mimetype='application/json'
+        )
 
     except Exception as e:
         print(f"Error in county_data: {str(e)}")
