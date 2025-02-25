@@ -1,3 +1,2 @@
 *.csv
-data.db
 api/__pycache__/
