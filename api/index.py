@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template, g
 import sqlite3
 import os
 import csv
+import traceback
 
 app = Flask(__name__)
 
@@ -23,47 +24,54 @@ ALLOWED_MEASURES = {
 
 def init_db():
     """Initialize the in-memory database and load data."""
-    db = sqlite3.connect(':memory:')
-    db.row_factory = sqlite3.Row
-    
-    # Create tables
-    db.execute('''
-        CREATE TABLE IF NOT EXISTS county_health_rankings (
-            State TEXT,
-            County TEXT,
-            State_code TEXT,
-            County_code TEXT,
-            Year_span TEXT,
-            Measure_name TEXT,
-            Measure_id TEXT,
-            Numerator TEXT,
-            Denominator TEXT,
-            Raw_value TEXT,
-            Confidence_Interval_Lower_Bound TEXT,
-            Confidence_Interval_Upper_Bound TEXT,
-            Data_Release_Year TEXT,
-            fipscode TEXT
-        )
-    ''')
-    
-    db.execute('''
-        CREATE TABLE IF NOT EXISTS zip_county (
-            zip TEXT,
-            default_state TEXT,
-            county TEXT,
-            county_state TEXT,
-            state_abbreviation TEXT,
-            county_code TEXT,
-            zip_pop TEXT,
-            zip_pop_in_county TEXT,
-            n_counties TEXT,
-            default_city TEXT
-        )
-    ''')
-    
-    # Load data from CSV files
     try:
+        db = sqlite3.connect(':memory:')
+        db.row_factory = sqlite3.Row
+        
+        # Create tables
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS county_health_rankings (
+                State TEXT,
+                County TEXT,
+                State_code TEXT,
+                County_code TEXT,
+                Year_span TEXT,
+                Measure_name TEXT,
+                Measure_id TEXT,
+                Numerator TEXT,
+                Denominator TEXT,
+                Raw_value TEXT,
+                Confidence_Interval_Lower_Bound TEXT,
+                Confidence_Interval_Upper_Bound TEXT,
+                Data_Release_Year TEXT,
+                fipscode TEXT
+            )
+        ''')
+        
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS zip_county (
+                zip TEXT,
+                default_state TEXT,
+                county TEXT,
+                county_state TEXT,
+                state_abbreviation TEXT,
+                county_code TEXT,
+                zip_pop TEXT,
+                zip_pop_in_county TEXT,
+                n_counties TEXT,
+                default_city TEXT
+            )
+        ''')
+        
+        # Print current working directory and list files for debugging
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Files in directory: {os.listdir('.')}")
+        print(f"Files in csv_data: {os.listdir('csv_data')}")
+        
+        # Load data from CSV files
         csv_dir = os.path.join(os.path.dirname(__file__), '..', 'csv_data')
+        print(f"CSV directory path: {csv_dir}")
+        print(f"Files in CSV directory: {os.listdir(csv_dir)}")
         
         with open(os.path.join(csv_dir, 'county_health_rankings.csv'), 'r') as f:
             reader = csv.reader(f)
@@ -82,10 +90,13 @@ def init_db():
             )
         
         db.commit()
+        print("Database initialized successfully")
+        return db
+        
     except Exception as e:
-        print(f"Error loading data: {e}")
-    
-    return db
+        print(f"Error in init_db: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise
 
 def get_db():
     """Get database connection."""
@@ -169,7 +180,9 @@ def county_data():
         return jsonify(results)
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Error in county_data: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
