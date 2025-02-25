@@ -63,7 +63,9 @@ def init_db():
     
     # Load data from CSV files
     try:
-        with open('county_health_rankings.csv', 'r') as f:
+        csv_dir = os.path.join(os.path.dirname(__file__), '..', 'csv_data')
+        
+        with open(os.path.join(csv_dir, 'county_health_rankings.csv'), 'r') as f:
             reader = csv.reader(f)
             next(reader)  # Skip header
             db.executemany(
@@ -71,7 +73,7 @@ def init_db():
                 reader
             )
         
-        with open('zip_county.csv', 'r') as f:
+        with open(os.path.join(csv_dir, 'zip_county.csv'), 'r') as f:
             reader = csv.reader(f)
             next(reader)  # Skip header
             db.executemany(
