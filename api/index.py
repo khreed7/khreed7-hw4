@@ -1,110 +1,114 @@
-from flask import Flask, render_template, request, jsonify
-from num2words import num2words
-from text2digits import text2digits
-import base64
-import re
+from flask import Flask, request, jsonify, render_template, g
+import sqlite3
+import os
 
 app = Flask(__name__)
 
-def text_to_number(text):
-    """Convert English text number to integer"""
-    # Remove any non-alphanumeric characters and convert to lowercase
-    text = re.sub(r'[^a-zA-Z\s-]', '', text.lower())
-    
-    # Special case for zero
-    if text in ['zero', 'nil']:
-        return 0
-    
-    t2d = text2digits.Text2Digits()
-    if m := re.match(r'^(minus|negative)\s+(.*)$', text):
-        return -int(t2d.convert(m.group(2)))
-    
-    return int(t2d.convert(text))
-    raise ValueError("Unable to convert text to number")
+# Allowed measures
+ALLOWED_MEASURES = {
+    "Violent crime rate",
+    "Unemployment",
+    "Children in poverty",
+    "Diabetic screening",
+    "Mammography screening",
+    "Preventable hospital stays",
+    "Uninsured",
+    "Sexually transmitted infections",
+    "Physical inactivity",
+    "Adult obesity",
+    "Premature Death",
+    "Daily fine particulate matter"
+}
 
-def number_to_text(number):
-    """Convert integer to English text"""
-    try:
-        return num2words(number)
-    except:
-        raise ValueError("Unable to convert number to text")
+# Database connection helper
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data.db')
 
-def base64_to_number(b64_str):
-    """Convert base64 to integer"""
-    try:
-        # Decode base64 to bytes, then convert bytes to integer
-        decoded_bytes = base64.b64decode(b64_str)
-        return int.from_bytes(decoded_bytes, byteorder='little')
-    except:
-        raise ValueError("Invalid base64 input")
+def get_db():
+    """Get a database connection."""
+    if not hasattr(g, 'db_conn'):
+        g.db_conn = sqlite3.connect(DATABASE_PATH)
+        g.db_conn.row_factory = sqlite3.Row
+    return g.db_conn
 
-def number_to_base64(number):
-    """Convert integer to base64"""
-    if number == 0:
-        return 'AA=='
-    if number < 0:
-        raise ValueError("Don't know how to convert negative number to base64")
-    try:
-        # Convert integer to bytes, then encode to base64
-        byte_count = (number.bit_length() + 7) // 8
-        number_bytes = number.to_bytes(byte_count, byteorder='little')
-        return base64.b64encode(number_bytes).decode('utf-8')
-    except:
-        raise ValueError("Unable to convert to base64")
+@app.teardown_appcontext
+def close_connection(exception):
+    """Close database connection at the end of the request."""
+    db = g.pop('db_conn', None)
+    if db is not None:
+        db.close()
 
+# Home route
 @app.route('/')
-def index():
+def home():
+    return render_template('home.html')
+
+# Page for manual county data entry
+@app.route('/county_data', methods=['GET'])
+def county_data_page():
     return render_template('index.html')
 
-@app.route('/convert', methods=['POST'])
-def convert():
+# API Endpoint to fetch county health rankings
+@app.route('/county_data', methods=['POST'])
+def county_data():
     try:
         data = request.get_json()
-        input_value = data['input']
-        input_type = data['inputType']
-        output_type = data['outputType']
-        
-        # Convert input to integer based on input type
-        if input_type == 'text':
-            number = text_to_number(input_value)
-        elif input_type == 'binary':
-            number = int(input_value, 2)
-        elif input_type == 'octal':
-            number = int(input_value, 8)
-        elif input_type == 'decimal':
-            number = int(input_value)
-        elif input_type == 'hexadecimal':
-            number = int(input_value, 16)
-        elif input_type == 'base64':
-            number = base64_to_number(input_value)
-        else:
-            raise ValueError("Invalid input type")
-            
-        # Convert integer to output type
-        if output_type == 'text':
-            result = number_to_text(number)
-        elif output_type == 'base64':
-            result = number_to_base64(number)
-        else:
-            neg = False
-            if number < 0:
-                neg = True
-                number = -number
-            if output_type == 'binary':
-                result = bin(number)[2:]  # Remove '0b' prefix
-            elif output_type == 'octal':
-                result = oct(number)[2:]  # Remove '0o' prefix
-            elif output_type == 'decimal':
-                result = str(number)
-            elif output_type == 'hexadecimal':
-                result = hex(number)[2:]  # Remove '0x' prefix
-            else:
-                raise ValueError("Invalid output type")
-            result = '-' + result if neg else result
-            
-        return jsonify({'result': result, 'error': None})
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+
+        # Easter egg for teapot status
+        if data.get('coffee') == 'teapot':
+            return "I'm a teapot", 418
+
+        # Extract parameters
+        zip_code = data.get('zip')
+        measure_name = data.get('measure_name')
+        limit = data.get('limit', 10)  # Default to 10
+
+        # Validate inputs
+        if not zip_code or not measure_name:
+            return jsonify({'error': 'Missing required parameters'}), 400
+
+        if not (isinstance(zip_code, str) and zip_code.isdigit() and len(zip_code) == 5):
+            return jsonify({'error': 'Invalid ZIP code format'}), 400
+
+        if measure_name not in ALLOWED_MEASURES:
+            return jsonify({'error': 'Invalid measure_name'}), 400
+
+        if not isinstance(limit, int) or limit < 1:
+            return jsonify({'error': 'Invalid limit parameter'}), 400
+
+        # Execute SQL query
+        db = get_db()
+        query = '''
+        SELECT State, County, State_code, County_code, Year_span, Measure_name,
+               Measure_id, Numerator, Denominator, Raw_value,
+               Confidence_Interval_Lower_Bound, Confidence_Interval_Upper_Bound,
+               Data_Release_Year, fipscode
+        FROM county_health_rankings
+        WHERE Measure_name = ?
+        ORDER BY Year_span DESC
+        LIMIT ?
+        '''
+        rows = db.execute(query, (measure_name, limit)).fetchall()
+
+        # If no data is found
+        if not rows:
+            return jsonify({'error': f'No data found for measure {measure_name}'}), 404
+
+        # Convert results into a list of dictionaries
+        column_names = [
+            "state", "county", "state_code", "county_code", "year_span",
+            "measure_name", "measure_id", "numerator", "denominator",
+            "raw_value", "confidence_interval_lower_bound",
+            "confidence_interval_upper_bound", "data_release_year", "fipscode"
+        ]
+
+        results = [dict(zip(column_names, row)) for row in rows]
+
+        return jsonify(results)
+
     except Exception as e:
-        return jsonify({'result': None, 'error': str(e)})
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True)

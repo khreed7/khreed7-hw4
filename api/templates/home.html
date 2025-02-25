@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>County Health Rankings API - Home</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 30px;
+            text-align: center;
+            background-color: #f4f7f9;
+            color: #2C3E50;
+        }
+
+        h1 {
+            font-weight: 600;
+            font-size: 32px;
+            margin-bottom: 20px;
+        }
+
+        .description {
+            font-size: 18px;
+            color: #555;
+            margin-bottom: 35px;
+        }
+
+        .button {
+            display: inline-block;
+            background: linear-gradient(135deg, #E67E22, #D35400);
+            color: white;
+            padding: 14px 28px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 18px;
+            font-weight: 500;
+            transition: all 0.3s ease-in-out;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .button:hover {
+            background: linear-gradient(135deg, #D35400, #E67E22);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .features {
+            text-align: left;
+            margin: 50px auto;
+            max-width: 650px;
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .features h2 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .features ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .features li {
+            font-size: 16px;
+            margin-bottom: 12px;
+            padding-left: 28px;
+            position: relative;
+        }
+
+        .features li::before {
+            content: "✔";
+            position: absolute;
+            left: 0;
+            color: #E67E22;
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome to the County Health Rankings API</h1>
+    
+    <div class="description">
+        <p>Explore detailed health rankings for counties across the U.S. with ease.</p>
+    </div>
+
+    <a href="/county_data" class="button">Access API Interface</a>
+
+    <div class="features">
+        <h2>What You Can Do:</h2>
+        <ul>
+            <li>Search county health data by ZIP code</li>
+            <li>Filter results by various health indicators</li>
+            <li>Customize response limits for efficiency</li>
+            <li>Test the API through an interactive interface</li>
+            <li>Includes support for HTTP 418 Teapot response (for fun!)</li>
+        </ul>
+    </div>
+</body>
+</html>
