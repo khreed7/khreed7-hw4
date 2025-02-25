@@ -24,21 +24,27 @@ ALLOWED_MEASURES = {
     "Daily fine particulate matter"
 }
 
+def dict_factory(cursor, row):
+    d = {}
+    for idx, col in enumerate(cursor.description):
+        d[col[0]] = row[idx]
+    return d
+
 def init_db():
     """Initialize the in-memory database and load data."""
     try:
         db = sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES)
-        db.row_factory = sqlite3.Row
+        db.row_factory = dict_factory
         
-        # Create tables
+        # Create tables with case-insensitive collation
         db.execute('''
             CREATE TABLE IF NOT EXISTS county_health_rankings (
-                State TEXT,
-                County TEXT,
-                State_code TEXT,
+                State TEXT COLLATE NOCASE,
+                County TEXT COLLATE NOCASE,
+                State_code TEXT COLLATE NOCASE,
                 County_code TEXT,
                 Year_span TEXT,
-                Measure_name TEXT,
+                Measure_name TEXT COLLATE NOCASE,
                 Measure_id TEXT,
                 Numerator TEXT,
                 Denominator TEXT,
@@ -53,10 +59,10 @@ def init_db():
         db.execute('''
             CREATE TABLE IF NOT EXISTS zip_county (
                 zip TEXT,
-                default_state TEXT,
-                county TEXT,
-                county_state TEXT,
-                state_abbreviation TEXT,
+                default_state TEXT COLLATE NOCASE,
+                county TEXT COLLATE NOCASE,
+                county_state TEXT COLLATE NOCASE,
+                state_abbreviation TEXT COLLATE NOCASE,
                 county_code TEXT,
                 zip_pop TEXT,
                 zip_pop_in_county TEXT,
@@ -91,12 +97,12 @@ def init_db():
         print("\nSample data from zip_county:")
         cursor = db.execute('SELECT * FROM zip_county LIMIT 5')
         for row in cursor:
-            print(row)
+            print(json.dumps(row, indent=2))
             
         print("\nSample data from county_health_rankings:")
         cursor = db.execute('SELECT * FROM county_health_rankings LIMIT 5')
         for row in cursor:
-            print(row)
+            print(json.dumps(row, indent=2))
             
         return db
         
@@ -165,60 +171,68 @@ def county_data():
         print(f"\nLooking up ZIP code {zip_code}:")
         zip_data = db.execute('SELECT * FROM zip_county WHERE zip = ?', (zip_code,)).fetchall()
         for row in zip_data:
-            print(row)
+            print(json.dumps(row, indent=2))
         
-        # Modified query with more lenient matching
+        if not zip_data:
+            return jsonify({'error': f'ZIP code {zip_code} not found in database'}), 404
+
+        # Get county and state info
+        county_name = zip_data[0]['county'].replace(' County', '')
+        state_name = zip_data[0]['county_state']
+        state_code = zip_data[0]['state_abbreviation']
+        
+        print(f"\nLooking for data with:")
+        print(f"County: {county_name} or {county_name} County")
+        print(f"State: {state_name} ({state_code})")
+        
+        # Debug: Show all records for this exact county and state
+        print("\nAll records for this exact county and state:")
+        county_data = db.execute('''
+            SELECT DISTINCT *
+            FROM county_health_rankings
+            WHERE (County = ? COLLATE NOCASE OR County = ? || ' County' COLLATE NOCASE)
+            AND State_code = ? COLLATE NOCASE
+            LIMIT 5
+        ''', (county_name, county_name, state_code)).fetchall()
+        
+        for row in county_data:
+            print(json.dumps(row, indent=2))
+        
+        # Get all available measures for this exact county and state
+        all_measures = db.execute('''
+            SELECT DISTINCT Measure_name
+            FROM county_health_rankings
+            WHERE (County = ? COLLATE NOCASE OR County = ? || ' County' COLLATE NOCASE)
+            AND State_code = ? COLLATE NOCASE
+        ''', (county_name, county_name, state_code)).fetchall()
+        
+        available_measures = [row['Measure_name'] for row in all_measures]
+        print(f"\nAvailable measures for this county: {available_measures}")
+        
+        # Modified query to be more explicit about state matching and case-insensitive
         query = '''
         SELECT DISTINCT chr.* 
         FROM county_health_rankings chr
-        JOIN zip_county zc ON (
-            (chr.County = zc.county || ' County' OR chr.County = zc.county)
-            AND (chr.State = zc.county_state OR chr.State_code = zc.state_abbreviation)
-        )
-        WHERE chr.Measure_name = ?
-            AND zc.zip = ?
+        WHERE (chr.County = ? COLLATE NOCASE OR chr.County = ? || ' County' COLLATE NOCASE)
+        AND chr.State_code = ? COLLATE NOCASE
+        AND chr.Measure_name = ? COLLATE NOCASE
         ORDER BY chr.Year_span DESC
         LIMIT ?
         '''
         
         print(f"\nExecuting query for measure '{measure_name}'")
-        rows = db.execute(query, (measure_name, zip_code, limit)).fetchall()
+        rows = db.execute(query, (county_name, county_name, state_code, measure_name, limit)).fetchall()
         
         # If no data is found
         if not rows:
-            # Try to find what data exists for this ZIP code
-            print(f"\nNo results found. Checking what measures exist for ZIP {zip_code}:")
-            available_measures = db.execute('''
-                SELECT DISTINCT chr.Measure_name 
-                FROM county_health_rankings chr
-                JOIN zip_county zc ON (
-                    (chr.County = zc.county || ' County' OR chr.County = zc.county)
-                    AND (chr.State = zc.county_state OR chr.State_code = zc.state_abbreviation)
-                )
-                WHERE zc.zip = ?
-            ''', (zip_code,)).fetchall()
-            print(f"Available measures: {[row[0] for row in available_measures]}")
-            
             return jsonify({
                 'error': f'No data found for ZIP {zip_code} and measure {measure_name}',
-                'available_measures': [row[0] for row in available_measures]
+                'available_measures': available_measures
             }), 404
-
-        # Convert results into a list of dictionaries
-        column_names = [
-            "state", "county", "state_code", "county_code", "year_span",
-            "measure_name", "measure_id", "numerator", "denominator",
-            "raw_value", "confidence_interval_lower_bound",
-            "confidence_interval_upper_bound", "data_release_year",
-            "fipscode"
-        ]
-        results = []
-        for row in rows:
-            results.append(dict(zip(column_names, row)))
 
         # Return formatted JSON response
         return app.response_class(
-            response=json.dumps(results, indent=2),
+            response=json.dumps(rows, indent=2),
             status=200,
             mimetype='application/json'
         )
@@ -229,4 +243,4 @@ def county_data():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5001)
