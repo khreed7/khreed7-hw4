@@ -21,7 +21,7 @@ ALLOWED_MEASURES = {
 }
 
 # Database connection helper
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data.db')
+DATABASE_PATH = 'data.db'
 
 def get_db():
     """Get a database connection."""
@@ -80,30 +80,36 @@ def county_data():
         # Execute SQL query
         db = get_db()
         query = '''
-        SELECT State, County, State_code, County_code, Year_span, Measure_name,
-               Measure_id, Numerator, Denominator, Raw_value,
-               Confidence_Interval_Lower_Bound, Confidence_Interval_Upper_Bound,
-               Data_Release_Year, fipscode
-        FROM county_health_rankings
-        WHERE Measure_name = ?
-        ORDER BY Year_span DESC
+        SELECT DISTINCT chr.State, chr.County, chr.State_code, chr.County_code, 
+               chr.Year_span, chr.Measure_name, chr.Measure_id, chr.Numerator, 
+               chr.Denominator, chr.Raw_value, chr.Confidence_Interval_Lower_Bound,
+               chr.Confidence_Interval_Upper_Bound, chr.Data_Release_Year,
+               chr.fipscode
+        FROM county_health_rankings chr
+        JOIN zip_county zc ON TRIM(chr.County) = TRIM(REPLACE(zc.county, ' County', ''))
+            AND TRIM(chr.State) = TRIM(zc.county_state)
+        WHERE chr.Measure_name = ? 
+            AND zc.zip = ?
+        ORDER BY chr.Year_span DESC
         LIMIT ?
         '''
-        rows = db.execute(query, (measure_name, limit)).fetchall()
+        rows = db.execute(query, (measure_name, zip_code, limit)).fetchall()
 
         # If no data is found
         if not rows:
-            return jsonify({'error': f'No data found for measure {measure_name}'}), 404
+            return jsonify({'error': f'No data found for ZIP {zip_code} and measure {measure_name}'}), 404
 
         # Convert results into a list of dictionaries
         column_names = [
             "state", "county", "state_code", "county_code", "year_span",
             "measure_name", "measure_id", "numerator", "denominator",
             "raw_value", "confidence_interval_lower_bound",
-            "confidence_interval_upper_bound", "data_release_year", "fipscode"
+            "confidence_interval_upper_bound", "data_release_year",
+            "fipscode"
         ]
-
-        results = [dict(zip(column_names, row)) for row in rows]
+        results = []
+        for row in rows:
+            results.append(dict(zip(column_names, row)))
 
         return jsonify(results)
 
