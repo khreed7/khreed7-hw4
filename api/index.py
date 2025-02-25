@@ -6,7 +6,7 @@ import traceback
 import json
 
 app = Flask(__name__)
-app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True  # Enable pretty printing of JSON
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
 
 # Allowed measures
 ALLOWED_MEASURES = {
@@ -27,7 +27,7 @@ ALLOWED_MEASURES = {
 def init_db():
     """Initialize the in-memory database and load data."""
     try:
-        db = sqlite3.connect(':memory:')
+        db = sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES)
         db.row_factory = sqlite3.Row
         
         # Create tables
@@ -67,6 +67,7 @@ def init_db():
         
         # Load data from CSV files
         csv_dir = os.path.join(os.path.dirname(__file__), '..', 'csv_data')
+        print(f"Loading data from {csv_dir}")
         
         with open(os.path.join(csv_dir, 'county_health_rankings.csv'), 'r') as f:
             reader = csv.reader(f)
@@ -85,6 +86,18 @@ def init_db():
             )
         
         db.commit()
+        
+        # Debug: Print some sample data
+        print("\nSample data from zip_county:")
+        cursor = db.execute('SELECT * FROM zip_county LIMIT 5')
+        for row in cursor:
+            print(row)
+            
+        print("\nSample data from county_health_rankings:")
+        cursor = db.execute('SELECT * FROM county_health_rankings LIMIT 5')
+        for row in cursor:
+            print(row)
+            
         return db
         
     except Exception as e:
@@ -147,21 +160,49 @@ def county_data():
 
         # Execute SQL query
         db = get_db()
+        
+        # Debug: Print ZIP code data
+        print(f"\nLooking up ZIP code {zip_code}:")
+        zip_data = db.execute('SELECT * FROM zip_county WHERE zip = ?', (zip_code,)).fetchall()
+        for row in zip_data:
+            print(row)
+        
+        # Modified query with more lenient matching
         query = '''
         SELECT DISTINCT chr.* 
         FROM county_health_rankings chr
-        JOIN zip_county zc ON chr.County = TRIM(REPLACE(zc.county, ' County', '')) || ' County'
-            AND chr.State = zc.county_state
+        JOIN zip_county zc ON (
+            (chr.County = zc.county || ' County' OR chr.County = zc.county)
+            AND (chr.State = zc.county_state OR chr.State_code = zc.state_abbreviation)
+        )
         WHERE chr.Measure_name = ?
             AND zc.zip = ?
         ORDER BY chr.Year_span DESC
         LIMIT ?
         '''
+        
+        print(f"\nExecuting query for measure '{measure_name}'")
         rows = db.execute(query, (measure_name, zip_code, limit)).fetchall()
-
+        
         # If no data is found
         if not rows:
-            return jsonify({'error': f'No data found for ZIP {zip_code} and measure {measure_name}'}), 404
+            # Try to find what data exists for this ZIP code
+            print(f"\nNo results found. Checking what measures exist for ZIP {zip_code}:")
+            available_measures = db.execute('''
+                SELECT DISTINCT chr.Measure_name 
+                FROM county_health_rankings chr
+                JOIN zip_county zc ON (
+                    (chr.County = zc.county || ' County' OR chr.County = zc.county)
+                    AND (chr.State = zc.county_state OR chr.State_code = zc.state_abbreviation)
+                )
+                WHERE zc.zip = ?
+            ''', (zip_code,)).fetchall()
+            print(f"Available measures: {[row[0] for row in available_measures]}")
+            
+            return jsonify({
+                'error': f'No data found for ZIP {zip_code} and measure {measure_name}',
+                'available_measures': [row[0] for row in available_measures]
+            }), 404
 
         # Convert results into a list of dictionaries
         column_names = [
