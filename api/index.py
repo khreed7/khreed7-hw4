@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template, g
 import sqlite3
 import os
+import csv
 
 app = Flask(__name__)
 
@@ -20,20 +21,80 @@ ALLOWED_MEASURES = {
     "Daily fine particulate matter"
 }
 
-# Database connection helper
-DATABASE_PATH = 'data.db'
+def init_db():
+    """Initialize the in-memory database and load data."""
+    db = sqlite3.connect(':memory:')
+    db.row_factory = sqlite3.Row
+    
+    # Create tables
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS county_health_rankings (
+            State TEXT,
+            County TEXT,
+            State_code TEXT,
+            County_code TEXT,
+            Year_span TEXT,
+            Measure_name TEXT,
+            Measure_id TEXT,
+            Numerator TEXT,
+            Denominator TEXT,
+            Raw_value TEXT,
+            Confidence_Interval_Lower_Bound TEXT,
+            Confidence_Interval_Upper_Bound TEXT,
+            Data_Release_Year TEXT,
+            fipscode TEXT
+        )
+    ''')
+    
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS zip_county (
+            zip TEXT,
+            default_state TEXT,
+            county TEXT,
+            county_state TEXT,
+            state_abbreviation TEXT,
+            county_code TEXT,
+            zip_pop TEXT,
+            zip_pop_in_county TEXT,
+            n_counties TEXT,
+            default_city TEXT
+        )
+    ''')
+    
+    # Load data from CSV files
+    try:
+        with open('county_health_rankings.csv', 'r') as f:
+            reader = csv.reader(f)
+            next(reader)  # Skip header
+            db.executemany(
+                'INSERT INTO county_health_rankings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                reader
+            )
+        
+        with open('zip_county.csv', 'r') as f:
+            reader = csv.reader(f)
+            next(reader)  # Skip header
+            db.executemany(
+                'INSERT INTO zip_county VALUES (?,?,?,?,?,?,?,?,?,?)',
+                reader
+            )
+        
+        db.commit()
+    except Exception as e:
+        print(f"Error loading data: {e}")
+    
+    return db
 
 def get_db():
-    """Get a database connection."""
-    if not hasattr(g, 'db_conn'):
-        g.db_conn = sqlite3.connect(DATABASE_PATH)
-        g.db_conn.row_factory = sqlite3.Row
-    return g.db_conn
+    """Get database connection."""
+    if not hasattr(g, 'db'):
+        g.db = init_db()
+    return g.db
 
 @app.teardown_appcontext
 def close_connection(exception):
     """Close database connection at the end of the request."""
-    db = g.pop('db_conn', None)
+    db = g.pop('db', None)
     if db is not None:
         db.close()
 
@@ -80,24 +141,16 @@ def county_data():
         # Execute SQL query
         db = get_db()
         query = '''
-        SELECT DISTINCT chr.State, chr.County, chr.State_code, chr.County_code, 
-               chr.Year_span, chr.Measure_name, chr.Measure_id, chr.Numerator, 
-               chr.Denominator, chr.Raw_value, chr.Confidence_Interval_Lower_Bound,
-               chr.Confidence_Interval_Upper_Bound, chr.Data_Release_Year,
-               chr.fipscode
+        SELECT DISTINCT chr.* 
         FROM county_health_rankings chr
-        JOIN zip_county zc ON TRIM(chr.County) = TRIM(REPLACE(zc.county, ' County', ''))
-            AND TRIM(chr.State) = TRIM(zc.county_state)
-        WHERE chr.Measure_name = ? 
-            AND zc.zip = ?
-        ORDER BY chr.Year_span DESC
+        WHERE chr.Measure_name = ?
         LIMIT ?
         '''
-        rows = db.execute(query, (measure_name, zip_code, limit)).fetchall()
+        rows = db.execute(query, (measure_name, limit)).fetchall()
 
         # If no data is found
         if not rows:
-            return jsonify({'error': f'No data found for ZIP {zip_code} and measure {measure_name}'}), 404
+            return jsonify({'error': f'No data found for measure {measure_name}'}), 404
 
         # Convert results into a list of dictionaries
         column_names = [
