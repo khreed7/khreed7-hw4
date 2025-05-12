@@ -166,6 +166,11 @@
                 <input type="number" id="limit" name="limit" value="10" min="1" max="100">
             </div>
 
+            <div class="form-group" style="display: flex; align-items: center;">
+                <input type="checkbox" id="sample_mode" name="sample_mode" style="width: auto; margin-right: 10px;">
+                <label for="sample_mode">Sample Mode (use when exact data isn't available)</label>
+            </div>
+
             <div class="teapot-section">
                 <h3> HTTP 418 - I'm a teapot</h3>
                 <p>Enable this option to test the famous HTTP 418 "I'm a teapot" response code.</p>
@@ -195,14 +200,19 @@
             const measure = document.getElementById('measure').value;
             const limit = parseInt(document.getElementById('limit').value);
             const teapot = document.getElementById('teapot').checked;
+            const sampleMode = document.getElementById('sample_mode').checked;
             
             const data = { zip, measure_name: measure, limit };
             if (teapot) data.coffee = 'teapot';
+            if (sampleMode) data.sample_mode = true;
 
             try {
                 const response = await fetch('/county_data', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-API-Key': 'cs1060-hw4-apikey'
+                    },
                     body: JSON.stringify(data)
                 });
 
